@@ -1,0 +1,1036 @@
+---
+title: "FSC non-compliance project Part 1"
+output:
+  html_notebook: default
+  html_document: default
+---
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+This is the guide to the code used in the FSC non-compliance prediction project.
+
+Step 1: Importing all the libraries needed
+```{r}
+#install.packages("rmarkdown")
+#install.packages("dplyr")
+#install.packages("randomForest")
+#install.packages("ggplot2")
+#install.packages("tibble")
+#install.packages("tidyr")
+#install.packages("readxl")
+#install.packages("stringr")
+
+library(ca)
+library(dplyr)
+library(randomForest)
+library(ggplot2)
+library(tibble)
+library(tidyr)
+library(readxl)
+library(stringr)
+```
+
+Step 2: Compile all the function necessary for the scripts to run
+```{r}
+#make dummie variables: First Column must be the ID, second Column the dummified thing
+makeDummies <- function(set1,name){
+  set1 <- distinct(set1)
+  set1$Y<-1
+  outP <- spread(set1,colnames(set1)[2],Y)
+  
+  for(i in 2:ncol(outP)){
+    colNold = colnames(outP[,i])
+    colNnew = str_c(name,colNold)
+    colnames(outP)[colnames(outP)==colNold] <- colNnew
+  }
+  outP <- mutate_all(outP,funs(if_else(is.na(.),0,.)))
+  return(outP)
+}
+
+#Select and rename a set of columns from the original PSC dataset
+#This is for Group 1 with Value 4 = flag, value8 = ShipKeelLayingDate, Value14 = ShipGT, IMO34=ISMIMO
+selectAndRenameG1 <- function(set1){
+  
+  #delete "ns1:" from the column names
+  lab <- colnames(set1)
+  for(i in 1:length(lab)){
+    lab[i]<-str_sub(lab[i],5)
+  }
+  names(set1) <- lab
+  
+  #select the columns to keep
+  outP <- set1 %>% select(InspectionID,ReportingAuthority,LocalOffice,PlaceOfInspection,PSCInspectionType,
+                          DateOfFirstVisit,Value4,Value8,Value14,IMO34,Value6,
+                          IMO,Value,Name,Country,CertificateCode,NumCrewOnBoard,NumBridgeWatchKeepingOfficers,
+                          DefectiveItemCode,isRORelated,isGroundDetention,
+                          NatureOfDefectCode,AccidentalDamage, isRectified,Type,SRP,DurationOfDetention) %>% distinct()
+  colnames(outP)[colnames(outP)=="Value4"] <- "Flag"
+  colnames(outP)[colnames(outP)=="Value8"] <- "ShipKeelLayingDate"
+  colnames(outP)[colnames(outP)=="Value14"] <- "ShipGT"
+  colnames(outP)[colnames(outP)=="IMO34"] <- "ISMIMO"
+  colnames(outP)[colnames(outP)=="Value"] <- "ShipName"
+  colnames(outP)[colnames(outP)=="Value6"] <- "ShipType"
+  outP$DurationOfDetention = as.numeric(outP$DurationOfDetention)
+  outP$ShipKeelLayingDate<-str_sub(outP$ShipKeelLayingDate,start = 1,end = -2)
+  outP$ShipKeelLayingDate<-as.Date(outP$ShipKeelLayingDate)
+  outP$DateOfFirstVisit<-str_sub(outP$DateOfFirstVisit,start = 1,end = -2)
+  outP$DateOfFirstVisit<-as.Date(outP$DateOfFirstVisit)
+  
+  return(outP)
+  
+}
+
+#Select and rename a set of columns from the original PSC dataset
+#This is for Group 2 with Value 2 = flag, value6 = ShipKeelLayingDate, Value12 = ShipGT, IMO32=ISMIMO
+selectAndRenameG2 <- function(set1){
+  
+  #delete "ns1:" from the column names
+  lab <- colnames(set1)
+  for(i in 1:length(lab)){
+    lab[i]<-str_sub(lab[i],5)
+  }
+  names(set1) <- lab
+  
+  #select the columns to keep
+  outP <- set1 %>% select(InspectionID,ReportingAuthority,LocalOffice,PlaceOfInspection,PSCInspectionType,
+                          DateOfFirstVisit,Value2,Value6,Value12,IMO32,Value4,
+                          IMO,Value,Name,Country,CertificateCode,NumCrewOnBoard,NumBridgeWatchKeepingOfficers,
+                          DefectiveItemCode,isRORelated,isGroundDetention,
+                          NatureOfDefectCode,AccidentalDamage, isRectified,Type,SRP,DurationOfDetention) %>% distinct()
+  colnames(outP)[colnames(outP)=="Value2"] <- "Flag"
+  colnames(outP)[colnames(outP)=="Value6"] <- "ShipKeelLayingDate"
+  colnames(outP)[colnames(outP)=="Value12"] <- "ShipGT"
+  colnames(outP)[colnames(outP)=="IMO32"] <- "ISMIMO"
+  colnames(outP)[colnames(outP)=="Value"] <- "ShipName"
+  colnames(outP)[colnames(outP)=="Value4"] <- "ShipType"
+  outP$DurationOfDetention = as.numeric(outP$DurationOfDetention)
+  outP$ShipKeelLayingDate<-str_sub(outP$ShipKeelLayingDate,start = 1,end = -2)
+  outP$ShipKeelLayingDate<-as.Date(outP$ShipKeelLayingDate)
+  outP$DateOfFirstVisit<-str_sub(outP$DateOfFirstVisit,start = 1,end = -2)
+  outP$DateOfFirstVisit<-as.Date(outP$DateOfFirstVisit)
+  
+  
+  return(outP)
+  
+}
+
+#Select and rename a set of columns from the original PSC dataset
+#This is for Group 3 with Value 4 = flag, value8 = ShipKeelLayingDate, Value12 = ShipGT, IMO34=ISMIMO
+selectAndRenameG3 <- function(set1){
+  
+  #delete "ns1:" from the column names
+  lab <- colnames(set1)
+  for(i in 1:length(lab)){
+    lab[i]<-str_sub(lab[i],5)
+  }
+  names(set1) <- lab
+  
+  #select the columns to keep
+  outP <- set1 %>% select(InspectionID,ReportingAuthority,LocalOffice,PlaceOfInspection,PSCInspectionType,
+                          DateOfFirstVisit,Value4,Value8,Value12,IMO34,Value6,
+                          IMO,Value,Name,Country,CertificateCode,NumCrewOnBoard,NumBridgeWatchKeepingOfficers,
+                          DefectiveItemCode,isRORelated,isGroundDetention,
+                          NatureOfDefectCode,AccidentalDamage, isRectified,Type,SRP,DurationOfDetention) %>% distinct()
+  colnames(outP)[colnames(outP)=="Value4"] <- "Flag"
+  colnames(outP)[colnames(outP)=="Value8"] <- "ShipKeelLayingDate"
+  colnames(outP)[colnames(outP)=="Value12"] <- "ShipGT"
+  colnames(outP)[colnames(outP)=="IMO34"] <- "ISMIMO"
+  colnames(outP)[colnames(outP)=="Value"] <- "ShipName"
+  colnames(outP)[colnames(outP)=="Value6"] <- "ShipType"
+  outP$DurationOfDetention = as.numeric(outP$DurationOfDetention)
+  outP$ShipKeelLayingDate<-str_sub(outP$ShipKeelLayingDate,start = 1,end = -2)
+  outP$ShipKeelLayingDate<-as.Date(outP$ShipKeelLayingDate)
+  outP$DateOfFirstVisit<-str_sub(outP$DateOfFirstVisit,start = 1,end = -2)
+  outP$DateOfFirstVisit<-as.Date(outP$DateOfFirstVisit)
+  
+  
+  return(outP)
+  
+}
+
+#Select and rename a set of columns from the original PSC dataset
+#This is for Group 1 with Value6 = flag, value10 = ShipKeelLayingDate, Value16 = ShipGT, IMO36=ISMIMO, value8 = ShipType
+selectAndRenameG4 <- function(set1){
+  
+  #delete "ns1:" from the column names
+  lab <- colnames(set1)
+  for(i in 1:length(lab)){
+    lab[i]<-str_sub(lab[i],5)
+  }
+  names(set1) <- lab
+  
+  #select the columns to keep
+  outP <- set1 %>% select(InspectionID,ReportingAuthority,LocalOffice,PlaceOfInspection,PSCInspectionType,
+                          DateOfFirstVisit,Value6,Value10,Value16,IMO36,Value8,
+                          IMO,Value,Name,Country,CertificateCode,NumCrewOnBoard,NumBridgeWatchKeepingOfficers,
+                          DefectiveItemCode,isRORelated,isGroundDetention,
+                          NatureOfDefectCode,AccidentalDamage, isRectified,Type,SRP,DurationOfDetention) %>% distinct()
+  colnames(outP)[colnames(outP)=="Value6"] <- "Flag"
+  colnames(outP)[colnames(outP)=="Value10"] <- "ShipKeelLayingDate"
+  colnames(outP)[colnames(outP)=="Value16"] <- "ShipGT"
+  colnames(outP)[colnames(outP)=="IMO36"] <- "ISMIMO"
+  colnames(outP)[colnames(outP)=="Value"] <- "ShipName"
+  colnames(outP)[colnames(outP)=="Value8"] <- "ShipType"
+  outP$DurationOfDetention = as.numeric(outP$DurationOfDetention)
+  outP$ShipKeelLayingDate<-str_sub(outP$ShipKeelLayingDate,start = 1,end = -2)
+  outP$ShipKeelLayingDate<-as.Date(outP$ShipKeelLayingDate)
+  outP$DateOfFirstVisit<-str_sub(outP$DateOfFirstVisit,start = 1,end = -2)
+  outP$DateOfFirstVisit<-as.Date(outP$DateOfFirstVisit)
+  
+  return(outP)
+  
+}
+
+#Script that instead of sorting by inspection, sorts by ship
+#Goal is to always use the latest information.
+#Deficiencies are all combined into all defs a ship ever had
+#This of course eliminates all information on where the inspections toke place
+#Starting point is the more or less unedited version of the PSC dataset
+createIMOSet = function(pscdata){
+  
+  pscdata$IMO = as.numeric(pscdata$IMO)
+  defectsIMO <- pscdata %>% filter(Flag!="NA")%>% filter(ShipType!='NA') %>% filter(Country!='NA')%>%filter(IMO!="NA")%>% filter(ShipGT!='NA')%>% select(IMO,DefectiveItemCode)
+  certificatesIMO <- pscdata %>% filter(Flag!="NA")%>% filter(ShipType!='NA') %>% filter(Country!='NA')%>%filter(IMO!="NA")%>% filter(ShipGT!='NA')%>% select(IMO,CertificateCode)
+  accidentIMO <- pscdata %>% filter(Flag!="NA")%>% filter(ShipType!='NA') %>% filter(Country!='NA')%>%filter(IMO!="NA")%>% filter(ShipGT!='NA')%>% select(IMO,AccidentalDamage)
+  
+  #Select existing Variables that can simply be copied
+  newPSC <- pscdata %>% select(IMO,DateOfFirstVisit,Flag,ShipKeelLayingDate,ShipGT,ISMIMO,ShipType,Country,DurationOfDetention,NumCrewOnBoard)%>% 
+    distinct() %>% 
+    filter(Flag!="NA")%>% filter(ShipType!='NA') %>% filter(Country!='NA')%>%filter(IMO!="NA")%>% filter(ShipGT!='NA') %>%
+    arrange(IMO)
+  
+  #Please nobody ask
+  newPSC$IMO = as.numeric(newPSC$IMO)
+  newPSC$IMO = as.factor(newPSC$IMO)
+  #mutate Date of visit + KeelLaying date to Age
+  newPSC$AgeInDays <- (newPSC$DateOfFirstVisit-newPSC$ShipKeelLayingDate)
+  
+  #Assamble a new table with one entry per ship
+  #We need all unique ship numbers
+  imoNumbers = unique(newPSC$IMO)
+  #Get the first row from which we will build the table
+  shipData =  newPSC[1,]
+  #Add Variables that indicate why there are different entries
+  #And also a variable to kick out the first row in the end
+  shipData$flagChange = 0
+  shipData$typeChange = 0
+  shipData$ismimoChange = 0
+  shipData$countryChange = 0
+  shipData$RemoveInTheEnd = "YES"
+  
+  
+  #For every IMO number we filter the ships entries from the PSC data
+  for(i in 1:length(imoNumbers)){
+    num = imoNumbers[i]
+    ship = newPSC %>% filter(IMO == num) %>% arrange(DateOfFirstVisit,desc(DateOfFirstVisit))
+    #Init the variables as zero
+    ship$flagChange = 0
+    ship$typeChange = 0
+    ship$ismimoChange = 0
+    ship$countryChange = 0
+    # If there are multiple entries we want to know if there is conflicting information before storing the newest info
+    # Add blacklist data to the flag-change
+    # Currentlz missing in the analysis for some reason
+    
+    if(nrow(ship)>1){
+      if(length(unique(ship$Flag))>1){ ship$flagChange = 1}
+      if(length(unique(ship$ShipType))>1) {ship$typeChange = 1}
+      if(length(unique(ship$ISMIMO))>1) {ship$ismimoChange = 1}
+      if(length(unique(ship$Country))>1) {ship$countryChange = 1}
+    }
+    for(i in 1:nrow(ship)){
+      if(is.na(ship$DurationOfDetention[i])){
+        ship$DurationOfDetention[i] = 0
+      }
+    }
+    #Sum up the time a ship was detained during its lifespan
+    ship$DurationOfDetention = sum(ship$DurationOfDetention)
+    ship$RemoveInTheEnd = "NO"
+    #Add the most recent row to the shipData set
+    shipData = bind_rows(shipData,ship[1,])
+  }
+  shipData = filter(shipData,RemoveInTheEnd=='NO') %>% arrange(IMO)
+  
+  #Dummyfication/ spreading
+  accidentIMO <- makeDummies(accidentIMO,'acc')
+  certificatesIMO <- makeDummies(certificatesIMO,'cert')
+  defectsIMO <- makeDummies(defectsIMO,'def')
+  
+  
+  #sorting and selecting for final merge
+  accidentIMO <- accidentIMO %>% select(IMO,"accTRUE") %>% arrange(IMO)
+  defectsIMO <- defectsIMO %>% arrange(IMO) %>% select(-`def<NA>`)
+  certificatesIMO <- certificatesIMO %>% arrange(IMO) %>% select(-`cert<NA>`)
+  
+  
+  #they are all 2-class factors, yay or nay
+  accidentIMO <- mutate_all(accidentIMO,funs(as.factor(.)))
+  certificatesIMO <- mutate_all(certificatesIMO,funs(as.factor(.)))
+  defectsIMO <- mutate_all(defectsIMO,funs(as.factor(.)))
+  
+  #Final merging of the dummies with existing PSC data
+  shipData <- shipData %>% left_join(accidentIMO,by="IMO") %>% left_join(defectsIMO,by="IMO") %>% left_join(certificatesIMO,by="IMO")
+  
+  #To create the sum of all defects there needs to be some casting between integers nd factors
+  defectsIMO$sumDefects = 0
+  bla <- defectsIMO %>% arrange(IMO) %>% select(-IMO)
+  bla <- mutate_all(bla,funs(as.integer(.)))
+  bla <- mutate_all(bla,funs(.-1))
+  for(i in 1:nrow(bla)){
+    bla$sumDefects[i]=sum(bla[i,])
+  }
+  
+  sumD = NULL
+  sumD$sumDef = bla$sumDefects
+  sumD$IMO = defectsIMO$IMO
+  sumD$sumDef=sumD$sumDef+1
+  sumD = as.tibble(sumD)
+  shipData <- shipData %>% left_join(sumD,by="IMO")
+  
+  #Because
+  shipData$Ship_GT = 0
+  for(i in 1:nrow(shipData)){
+    if(is.na(shipData$ShipGT[i])){
+      shipData$Ship_GT[i] = 0
+    }
+    else{
+      shipData$Ship_GT[i] = shipData$ShipGT[i]
+    }
+  }
+  
+  #Because
+  shipData$ismimo = 0
+  for(i in 1:nrow(shipData)){
+    if(is.na(shipData$ISMIMO[i])){
+      shipData$ismimo[i] = 0
+    }
+    else{
+      shipData$ismimo[i] = shipData$ISMIMO[i]
+    }
+  }
+  
+  #that needed a better name
+  colnames(shipData)[colnames(shipData)=="accTRUE"] <- "accident"
+  rm(defectsIMO,certificatesIMO,accidentIMO)
+
+  shipData$response = 0
+  # create a propper response variable
+  for(i in 1:nrow(shipData)){
+    if(shipData$def14612[i] == 1) shipData$response[i] = 1
+    if(shipData$def14614[i] == 1) shipData$response[i] = 1
+    if(shipData$def14616[i] == 1) shipData$response[i] = 1
+    if(shipData$def14617[i] == 1) shipData$response[i] = 1
+  }
+  shipData = shipData %>% select(-def14612, -def14614, -def14616, -def14617)
+  
+  return(shipData)
+}
+
+```
+
+Step 3: We import the data necessary for the project
+This means we import inspection data...
+```{r}
+#Imports all XLSX from folders
+g12015AprJun <- selectAndRenameG1(read_excel("~/R/Zeevaart/EMSA/group1/PSC restricted 2015 Apr_Jun.xlsx"))
+g12015OktDec <- selectAndRenameG1(read_excel("~/R/Zeevaart/EMSA/group1/PSC restricted 2015 Okt-Dec.xlsx"))
+g12016AugSep <- selectAndRenameG1(read_excel("~/R/Zeevaart/EMSA/group1/PSC restricted 2016 Aug-Sep.xlsx"))
+g12016Jul    <- selectAndRenameG1(read_excel("~/R/Zeevaart/EMSA/group1/PSC restricted 2016 Jul.xlsx"))
+g12016OktDec <- selectAndRenameG1(read_excel("~/R/Zeevaart/EMSA/group1/PSC restricted 2016 Okt-Dec.xlsx"))
+g12014JanApr <- selectAndRenameG1(read_excel("~/R/Zeevaart/EMSA/group1/rawdataPSC2014Jan2Apr.xlsx"))
+g12014SepDec <- selectAndRenameG1(read_excel("~/R/Zeevaart/EMSA/group1/rawdataPSC2014Sep2Dec.xlsx"))
+g12017JanMar <- selectAndRenameG1(read_excel("~/R/Zeevaart/EMSA/PMOU 2017/rawdataPSC2017Jan-Mar.xlsx"))
+g12017AprJun <- selectAndRenameG1(read_excel("~/R/Zeevaart/EMSA/PMOU 2017/rawdataPSC2017Apr-Jun.xlsx"))
+g12016JanMar <- selectAndRenameG1(read_excel("~/R/Zeevaart/EMSA/PMOU 2016/PSC Restricted 2016 Jan-Mar.xlsx"))
+g12016AprJun <- selectAndRenameG1(read_excel("~/R/Zeevaart/EMSA/PMOU 2016/PSC restricted 2016 Apr_Jun.xlsx"))
+
+g22013JanMar <- selectAndRenameG2(read_excel("~/R/Zeevaart/EMSA/group2/PSC restricted 2013 Jan-Mar.xlsx"))
+g22015JanMar <- selectAndRenameG2(read_excel("~/R/Zeevaart/EMSA/group2/PSC restricted 2015 Jan-Mar.xlsx"))
+g22015JulSep <- selectAndRenameG2(read_excel("~/R/Zeevaart/EMSA/group2/PSC restricted 2015 Jul-Sep.xlsx"))
+
+g32013JulSep <- selectAndRenameG3(read_excel("~/R/Zeevaart/EMSA/group3/PSC restricted 2013 Jul-Sep.xlsx"))
+g32013OktDec <- selectAndRenameG3(read_excel("~/R/Zeevaart/EMSA/group3/PSC restricted 2013 Okt-Dec.xlsx"))
+
+g42017JulSep <- selectAndRenameG4(read_excel("~/R/Zeevaart/EMSA/PMOU 2017/rawdataPSC2017Jul-Sep.xlsx"))
+g42017OktDec <- selectAndRenameG4(read_excel("~/R/Zeevaart/EMSA/PMOU 2017/rawdataPSC2017Okt-Dec.xlsx"))
+g42013AprJun <- selectAndRenameG4(read_excel("~/R/Zeevaart/EMSA/Unique/PSC restricted 2013 Apr-Jun.xlsx"))
+
+
+#Select and rename a set of columns from rawdataPSC2014May2Aug
+#This is for PSC 2014 May - August
+set1 <- read_excel("~/R/Zeevaart/EMSA/Unique/rawdataPSC2014May2Aug.xlsx")
+#delete "ns1:" from the column names
+lab <- colnames(set1)
+for(i in 1:length(lab)){
+  lab[i]<-str_sub(lab[i],5)
+}
+names(set1) <- lab
+
+#select the columns to keep
+outP <- set1 %>% select(InspectionID,ReportingAuthority,LocalOffice,PlaceOfInspection,PSCInspectionType,
+                        DateOfFirstVisit,Value2,Value6,Value14,IMO32,Value4,
+                        IMO,Value,Name,Country,CertificateCode,NumCrewOnBoard,NumBridgeWatchKeepingOfficers,
+                        DefectiveItemCode,isRORelated,isGroundDetention,
+                        NatureOfDefectCode,AccidentalDamage, isRectified,Type,SRP,DurationOfDetention) %>% distinct()
+colnames(outP)[colnames(outP)=="Value2"] <- "Flag"
+colnames(outP)[colnames(outP)=="Value6"] <- "ShipKeelLayingDate"
+colnames(outP)[colnames(outP)=="Value14"] <- "ShipGT"
+colnames(outP)[colnames(outP)=="IMO32"] <- "ISMIMO"
+colnames(outP)[colnames(outP)=="Value"] <- "ShipName"
+colnames(outP)[colnames(outP)=="Value4"] <- "ShipType"
+outP$DurationOfDetention = as.numeric(outP$DurationOfDetention)
+outP$ShipKeelLayingDate<-str_sub(outP$ShipKeelLayingDate,start = 1,end = -2)
+outP$ShipKeelLayingDate<-as.Date(outP$ShipKeelLayingDate)
+outP$DateOfFirstVisit<-str_sub(outP$DateOfFirstVisit,start = 1,end = -2)
+outP$DateOfFirstVisit<-as.Date(outP$DateOfFirstVisit)
+
+
+psc2014MayAug <- outP
+#combine all imported data into one table and remove the parts afterwards
+PSCData <- bind_rows(g12014JanApr,g12014SepDec,g12015AprJun,g12015OktDec,g12016AugSep,g12016Jul,g12016OktDec,g12017JanMar,g12017AprJun,
+                     g22013JanMar,g22015JanMar,g22015JulSep,g32013JulSep,g32013OktDec,g42017JulSep,g42017OktDec,g42013AprJun,psc2014MayAug,g12016JanMar,g12016AprJun)
+rm(g12014JanApr,g12014SepDec,g12015AprJun,g12015OktDec,g12016AugSep,g12016Jul,g12016OktDec,g12017JanMar,g12017AprJun,
+   g22013JanMar,g22015JanMar,g22015JulSep,g32013JulSep,g32013OktDec,g42017JulSep,g42017OktDec,g42013AprJun,psc2014MayAug,
+   g12016JanMar,g12016AprJun,
+   set1,outP)
+```
+
+...fuel inspection data... Replace the path with the FULL path you saved the data at.
+```{r}
+ILT_sulphur_2015_17 <- read_excel("~/R/Zeevaart/Data/ILT sulphur 2015-17.xlsx",
+                                  col_types = c("blank", "text", "date", "numeric", "numeric", "blank"))
+colnames(ILT_sulphur_2015_17)[colnames(ILT_sulphur_2015_17)=="IMO.nr."] <- "IMO"
+colnames(ILT_sulphur_2015_17)[colnames(ILT_sulphur_2015_17)=="datum monstername"] <- "Date"
+```
+
+...and fuel price data.
+```{r}
+X180_prices <- read_excel("~/R/Zeevaart/Data/180 prices.xlsx",
+                          col_types = c("date", "numeric", "numeric","numeric", "numeric"))
+X380_prices <- read_excel("~/R/Zeevaart/Data/380 prices.xlsx",
+                          col_types = c("date", "numeric", "numeric","numeric", "numeric"))
+MDO_prices <- read_excel("~/R/Zeevaart/Data/MDO prices.xlsx",
+                          col_types = c("date", "numeric", "numeric","numeric", "numeric"))
+MGO_prices <- read_excel("~/R/Zeevaart/Data/MGO prices.xlsx",
+                          col_types = c("date", "numeric", "numeric","numeric", "numeric"))
+
+fuel_combined = left_join(X180_prices,X380_prices,by='Date')
+fuel_combined = left_join(fuel_combined,MDO_prices,by='Date')
+fuel_combined = left_join(fuel_combined,MGO_prices,by='Date')
+fuel_combined$avg_price = (fuel_combined$avg_180_price + fuel_combined$avg_380_price + fuel_combined$avg_MDO_price + fuel_combined$avg_MGO_price)/4
+fuel_combined$diff_MGO_All = (fuel_combined$avg_MGO_price-((fuel_combined$avg_180_price+fuel_combined$avg_380_price+fuel_combined$avg_MDO_price)/3))
+rm(X180_prices,X380_prices,MDO_prices,MGO_prices)
+```
+
+Step 4a: Transforming the inspection data
+In this step, the inspection data is transformed with the 'createIMOSet' function so that each row represents one ship.
+```{r}
+shipSet = createIMOSet(PSCData)
+```
+
+This set is already usable, but we also want to add the fuel price data, and the fuel inspection data
+```{r}
+1# Some moddifications on the shipSet. Adding the fuel measurements
+
+# Changing the name of that column to something more fitting
+colnames(shipSet)[colnames(shipSet)=="DateOfFirstVisit"] <- "DateOfLastVisit"
+
+#Add the fuel measurements 
+maxSul = ILT_sulphur_2015_17 %>% select(IMO,SGS, Date)
+shipSet = left_join(shipSet,maxSul,by='IMO')
+shipSet$DateOfLastVisit <- format(as.POSIXct(shipSet$DateOfLastVisit, format= '%Y-%m-%d'))
+
+# improve response variable
+for(i in 1:nrow(shipSet)){
+  if(!is.na(shipSet$SGS[i])){
+    if(shipSet$SGS[i] >= 0.12){
+      shipSet$response[i] = 1
+    }
+  }
+  if(!is.na(shipSet$Date)){
+  if(shipSet$Date[i] > shipSet$DateOfLastVisit[i]){
+    shipSet$DateOfLastVisit = shipSet$Date
+  }}
+}
+
+#remove the actual measurements
+shipSet = shipSet %>% select(-SGS,-Date)
+
+#add avg. monthly fuel price differences
+mfpa = fuel_combined %>% select(diff_MGO_All, Date)
+mfpa$Date <- format(as.Date(mfpa$Date, format="%d/%m/%Y"),"%Y-%m")
+mfpa = mfpa %>% group_by(Date) %>% summarise(monthlyFPD=mean(diff_MGO_All))
+colnames(mfpa)[colnames(mfpa)=="Date"] <- "YearMonth"
+
+shipSet$YearMonth <- format(as.Date(shipSet$DateOfLastVisit, format="%Y-%m-%d"),"%Y-%m")
+shipSet = left_join(shipSet,mfpa,by="YearMonth")
+
+# Some more NAs
+for(i in 1:nrow(shipSet)){
+  if(is.na(shipSet$monthlyFPD[i])){
+    shipSet$monthlyFPD[i] = 0
+  }
+}
+
+shipSet = select(shipSet, -ISMIMO, -ShipGT, -RemoveInTheEnd,-NumCrewOnBoard)
+
+# Proper casting of the variables
+shipSet$Flag = as.factor(shipSet$Flag)
+shipSet$ismimo = as.factor(shipSet$ismimo)
+shipSet$ShipType = as.factor(shipSet$ShipType)
+shipSet$IMO = as.character(shipSet$IMO)
+shipSet$Country = as.factor(shipSet$Country)
+shipSet$Ship_GT = as.integer(shipSet$Ship_GT)
+shipSet$response = as.factor(shipSet$response)
+shipSet$flagChange = as.factor(shipSet$flagChange)
+shipSet$typeChange = as.factor(shipSet$typeChange)
+shipSet$ismimoChange = as.factor(shipSet$ismimoChange)
+shipSet$countryChange = as.factor(shipSet$countryChange)
+shipSet$DateOfLastVisit = format(as.POSIXct(shipSet$DateOfLastVisit),"%Y-%m-%d")
+
+setwd("~/R/Zeevaart/Data")
+write.csv(shipSet, 'shipSet.csv')
+
+```
+
+The resulting shipSet is our finished dataset which now can be used for model training.
+
+For the next parts the following packages are necessary:
+```{r}
+#install.packages("caret")
+#install.packages("fastAdaboost")
+#install.packages("caTools")
+#install.packages("pROC")
+#install.packages("ggthemes")
+#install.packages("plotROC")
+#install.packages("car")
+library(e1071)
+library(caret)
+library(fastAdaboost)
+library(caTools)
+library(pROC)
+library(ggthemes)
+library(plotROC)
+library(car)
+
+library(ca)
+library(dplyr)
+library(randomForest)
+library(ggplot2)
+library(tibble)
+library(tidyr)
+library(readxl)
+library(stringr)
+
+```
+If they were imported correctly, continue with step 5.
+
+If not, continue with 4b.
+
+Step 4b: Hashing the data is removed, continue with step 5
+
+The hashing:
+#```{r}
+# This creates hashing tables for all data which could be used to directly identify a ship, or the place it was inspected
+assign_hash <- Vectorize(assign, vectorize.args = c("x", "value"))
+get_hash <- Vectorize(get, vectorize.args = "x")
+exists_hash <- Vectorize(exists, vectorize.args = "x")
+
+key.name = as.character(unique(PSCData$Name))
+value.name = c(1:length(key.name))
+hash.name = new.env(hash = TRUE, parent = emptyenv(), size = 100L)
+assign_hash(key.name, value.name, hash.name)
+
+key.imo = as.character(unique(PSCData$IMO))
+value.imo = c(1:length(key.imo))
+hash.imo = new.env(hash = TRUE, parent = emptyenv(), size = 100L)
+assign_hash(key.imo, value.imo, hash.imo)
+
+key.ISMIMO = as.character(unique(PSCData$ISMIMO))
+value.ISMIMO = c(1:length(key.ISMIMO))
+hash.ISMIMO = new.env(hash = TRUE, parent = emptyenv(), size = 100L)
+assign_hash(key.ISMIMO, value.ISMIMO, hash.ISMIMO)
+
+key.office = as.character(unique(PSCData$LocalOffice))
+value.office = c(1:length(key.office))
+hash.office = new.env(hash = TRUE, parent = emptyenv(), size = 100L)
+assign_hash(key.office, value.office, hash.office)
+
+key.authority = as.character(unique(PSCData$ReportingAuthority))
+value.authority = c(1:length(key.authority))
+hash.authority = new.env(hash = TRUE, parent = emptyenv(), size = 100L)
+assign_hash(key.authority, value.authority, hash.authority)
+
+key.flag = as.character(unique(PSCData$Flag))
+value.flag = c(1:length(key.flag))
+hash.flag = new.env(hash = TRUE, parent = emptyenv(), size = 100L)
+assign_hash(key.flag, value.flag, hash.flag)
+
+
+key.place = as.character(unique(PSCData$PlaceOfInspection))
+value.place = c(1:length(key.place))
+hash.place = new.env(hash = TRUE, parent = emptyenv(), size = 100L)
+assign_hash(key.place, value.place, hash.place)
+
+key.country = as.character(unique(PSCData$Country))
+value.country = c(1:length(key.country))
+hash.country = new.env(hash = TRUE, parent = emptyenv(), size = 100L)
+assign_hash(key.country, value.country, hash.country)
+
+key.inspID = as.character(unique(PSCData$InspectionID))
+value.inspID = c(1:length(key.inspID))
+hash.inspID = new.env(hash = TRUE, parent = emptyenv(), size = 100L)
+assign_hash(key.inspID, value.inspID, hash.inspID)
+
+hashedShipSet =  shipSet
+for(i in 1:nrow(hashedShipSet)){
+  
+  a = as.character(hashedShipSet$IMO[i])
+  hashedShipSet$IMO[i] = hash.imo[[a]]
+  
+  if(hashedShipSet$ismimo[i]!=0){
+    a = as.character(hashedShipSet$ismimo[i])
+  hashedShipSet$ismimo[i] = hash.ISMIMO[[a]]}
+  
+  if(!is.na(hashedShipSet$Flag[i])){
+    a = as.character(hashedShipSet$Flag[i])
+  hashedShipSet$Flag[i] = hash.flag[[a]]}
+  
+  if(!is.na(hashedShipSet$Country[i])){
+    a = as.character(hashedShipSet$Country[i])
+  hashedShipSet$Country[i] = hash.country[[a]]}
+}
+```
+
+Now the hashedShipSet needs to be saved as a csv...
+#```{r}
+write.csv(hashedShipSet,"hashedShipSet.csv")
+```
+
+...and manually transfered to another computer that can import the necessary libraries.
+Continue on the other computer with Part 2, Step 4c.
+
+
+Step 5: Training and testing the models
+
+We create 20 models in a repeated hold-out validation strategy. For 20 times we create train:test data splits of 1:1 with the training data being downsampled to have a compliance:non-compliance ratio of 2:1. The models are trained and tested on these sets, and the results stored in confusion matrices. In the end we will have 20 confusion matrices from the models and 20 probability predictions from the models.
+```{r}
+
+setwd("../Data")
+shipSet <- read.csv('shipSet.csv') #, stringsAsFactors = FALSE)
+
+rf_model = list()
+lb_model = list()
+rf_cm = list()
+ada_cm = list()
+lb_cm = list()
+rf_probs = list()
+ada_probs = list()
+lb_probs = list()
+rf_VarImp = list()
+rf_varUsed = list()
+
+# use 2 instead of 20 to check the code
+for(index in 1:1){
+  runAgain = T
+  #Run the loop until no error message is thrown
+  #This is needed because the random Training-Test set creation sometimes creates splits that are incompatible.
+ # while(runAgain == T){
+#    tryCatch({
+      
+      comp = shipSet %>% filter(response != 1) %>% select(-IMO, -DateOfLastVisit, -YearMonth)
+      nonComp = shipSet %>% filter(response == 1) %>% select(-IMO, -DateOfLastVisit,-YearMonth)
+      randnum <- runif(nrow(nonComp)) #uniformly distributed random numbers in the range [0,1]
+      traindata <- nonComp[randnum<=0.5, ] #50/50 split
+      testdata<- nonComp[randnum>0.5, ]
+      
+      x = nrow(traindata)*2#Sets the amount of non-compliances we want in the training set.
+      y = nrow(testdata)
+      z = nrow(comp)
+      
+      #to extract approximetly the right probortion of compliant ships
+      randum = runif(z)
+      traindata = traindata %>% bind_rows(comp[randnum<=(x/z), ])
+      
+      #To not over sample
+      comp = comp[randnum>(x/z), ]
+      
+      z = nrow(comp)
+      randum = runif(z)
+      testdata = testdata %>% bind_rows(comp[randnum<=0.5, ])
+      
+      traindata$response = make.names(traindata$response)
+      traindata$response = as.factor(traindata$response)
+
+      #Formate the test set
+      testdataX = testdata %>% select(-response)
+      testdataY = testdata %>% select(response)
+      testdataY = data.frame(testdataY)
+      testdataY$response = make.names(testdataY$response)
+      testdataY$response = as.factor(testdataY$response)
+
+      #Train the models
+      
+      fitControl = trainControl(method='none',classProbs = TRUE)
+
+      grid <-  expand.grid(mtry=100)
+      rf_fit = train(response ~ ., data=traindata,
+                     method = "rf",
+                     metric = "Kappa",
+                     trControl = fitControl,
+                     tuneGrid = grid,
+                     na.action=na.exclude)
+
+
+
+      #rf_model[index] = list(rf_fit)
+
+      prediction = predict(rf_fit, newdata = testdataX)
+      rf_cm[index] = list(confusionMatrix(prediction,testdataY$response))
+
+      rf_prob_results = predict(rf_fit, newdata = testdataX, type = "prob")
+      rf_prob_results$response = testdataY$response
+      rf_prob_results=arrange(rf_prob_results,desc(X1))
+      rf_prob_results$response = as.numeric(rf_prob_results$response)
+      rf_prob_results$response = rf_prob_results$response-1
+      rf_probs[index] = list(rf_prob_results)
+
+      rf_VarImp[index] = list(varImp(rf_fit))
+      rf_varUsed[index] = list(data_frame(rf_fit$coefnames,varUsed(rf_fit$finalModel)))
+
+      grid <-  expand.grid(nIter = 100,method="raw")
+
+      #ada_fit = train(response ~ ., data=traindata,
+      #                method = "adaboost",
+      #                metric = "Kappa",
+      #                trControl = fitControl,
+      #                tuneGrid = grid,
+      #                na.action=na.exclude)
+
+      #prediction = predict(ada_fit, newdata = testdataX)
+      #ada_cm[index] = list(confusionMatrix(prediction,testdataY$response))
+
+      #ada_prob_results = predict(ada_fit, newdata = testdataX, type = "prob")
+      #ada_prob_results$response = testdataY$response
+      #ada_prob_results=arrange(ada_prob_results,desc(X1))
+      #ada_prob_results$response = as.numeric(ada_prob_results$response)
+      #ada_prob_results$response = ada_prob_results$response-1
+      #ada_probs[index] = list(ada_prob_results)
+      #rm(ada_fit)
+      
+      grid <-  expand.grid(nIter = 100)
+      
+      lb_fit = train(response ~ ., data = traindata,
+                     method = "LogitBoost",
+                     metric = "Kappa",
+                     trControl = fitControl,
+                     tuneGrid = grid,
+                     na.action=na.exclude)
+      
+      #lb_model[index] = list(lb_fit)
+      prediction = predict(lb_fit, newdata = testdataX)
+      lb_cm[index] = list(confusionMatrix(prediction,testdataY$response))
+      
+      lb_prob_results = predict(lb_fit, newdata = testdataX, type = "prob")
+      lb_prob_results$response = testdataY$response
+      lb_prob_results=arrange(lb_prob_results,desc(X1))
+      lb_prob_results$response = as.numeric(lb_prob_results$response)
+      lb_prob_results$response = lb_prob_results$response-1
+      lb_probs[index] = list(lb_prob_results)
+      
+      runAgain<-F
+      print(index)
+      
+#    },error=function(cond) {
+#      message(cond)
+#      message()
+#    },finally={})
+    
+ # }
+  
+}
+```
+
+Step 6: Evaluate the results
+
+First we transform the confusion matrix objects from each model into data.frames and add the performance indicators.
+```{r}
+mcc = function(TN,FN,FP,TP){
+  a=(TP*TN-FP*FN)/sqrt((TP+FP)*(TP+FN)*(TN+FP)*(TN+FN))
+  return(a)
+}
+#Combine all CMs into one table for each model type
+rf_cm_all = data.frame(TN=c(0),FN=c(0),FP=c(0),TP=c(0))
+#ada_cm_all = data.frame(TN=c(0),FN=c(0),FP=c(0),TP=c(0))
+lb_cm_all = data.frame(TN=c(0),FN=c(0),FP=c(0),TP=c(0))
+
+for (i in 1:20) {
+  a = rf_cm[[i]]
+  a = a$table
+  rf_cm_all[i,1]=a[1,1]
+  rf_cm_all[i,2]=a[1,2]
+  rf_cm_all[i,3]=a[2,1]
+  rf_cm_all[i,4]=a[2,2]
+}
+
+#for (i in 1:20) {
+#  a = ada_cm[[i]]
+#  a = a$table
+#  ada_cm_all[i,1]=a[1,1]
+#  ada_cm_all[i,2]=a[1,2]
+#  ada_cm_all[i,3]=a[2,1]
+#  ada_cm_all[i,4]=a[2,2]
+#}
+
+for (i in 1:20) {
+  a = lb_cm[[i]]
+  a = a$table
+  lb_cm_all[i,1]=a[1,1]
+  lb_cm_all[i,2]=a[1,2]
+  lb_cm_all[i,3]=a[2,1]
+  lb_cm_all[i,4]=a[2,2]
+}
+
+#Add to those tables the performance indicators
+for(i in 1:20){
+  rf_cm_all$FOR[i] = rf_cm_all$FN[i]/(rf_cm_all$TN[i]+rf_cm_all$FN[i])
+  rf_cm_all$Precision[i] = rf_cm_all$TP[i]/(rf_cm_all$TP[i]+rf_cm_all$FP[i])
+  rf_cm_all$FPR[i] = rf_cm_all$FP[i]/(rf_cm_all$FP[i]+rf_cm_all$TN[i])
+  rf_cm_all$Recall[i] = rf_cm_all$TP[i]/(rf_cm_all$TP[i]+rf_cm_all$FN[i])
+  rf_cm_all$MCC[i] = mcc(rf_cm_all$TN[i],rf_cm_all$FN[i],rf_cm_all$FP[i],rf_cm_all$TP[i])
+}
+
+#for(i in 1:20){
+#  ada_cm_all$FOR[i] = ada_cm_all$FN[i]/(ada_cm_all$TN[i]+ada_cm_all$FN[i])
+#  ada_cm_all$Precision[i] = ada_cm_all$TP[i]/(ada_cm_all$TP[i]+ada_cm_all$FP[i])
+#  ada_cm_all$FPR[i] = ada_cm_all$FP[i]/(ada_cm_all$FP[i]+ada_cm_all$TN[i])
+#  ada_cm_all$Recall[i] = ada_cm_all$TP[i]/(ada_cm_all$TP[i]+ada_cm_all$FN[i])
+#  ada_cm_all$MCC[i] = mcc(ada_cm_all$TN[i],ada_cm_all$FN[i],ada_cm_all$FP[i],ada_cm_all$TP[i])
+#}
+
+for(i in 1:20){
+  lb_cm_all$FOR[i] = lb_cm_all$FN[i]/(lb_cm_all$TN[i]+lb_cm_all$FN[i])
+  lb_cm_all$Precision[i] = lb_cm_all$TP[i]/(lb_cm_all$TP[i]+lb_cm_all$FP[i])
+  lb_cm_all$FPR[i] = lb_cm_all$FP[i]/(lb_cm_all$FP[i]+lb_cm_all$TN[i])
+  lb_cm_all$Recall[i] = lb_cm_all$TP[i]/(lb_cm_all$TP[i]+lb_cm_all$FN[i])
+  lb_cm_all$MCC[i] = mcc(lb_cm_all$TN[i],lb_cm_all$FN[i],lb_cm_all$FP[i],lb_cm_all$TP[i])
+}
+
+
+```
+
+Then we can carry out an ANOVA to check for significant differences between the models
+```{r}
+#These lines do the following
+#1. Stack the results from the models
+#2. Plot the distributions to check for normality
+#3. Do a levene test to check homogeneity of variance
+#4. Post Hoc test on a one way anova to test what models are different to other models
+mcc_df = stack(data.frame(Random_Forest=rf_cm_all$MCC,LogitBoost=lb_cm_all$MCC)) #AdaBoost=ada_cm_all$MCC,
+ggplot(data=mcc_df,aes(y=values,x=ind))+geom_violin()+theme_minimal()+labs(x="Models",y="MCC",title = "MCC Distributions")
+leveneTest(values~ind,data=mcc_df)
+mcc_anova = TukeyHSD(aov(values~ind,data = mcc_df))
+mcc_anova
+
+recall_df = stack(data.frame(Random_Forest=rf_cm_all$Recall,LogitBoost=lb_cm_all$Recall)) #AdaBoost=ada_cm_all$Recall,
+ggplot(data=recall_df,aes(y=values,x=ind))+geom_violin()+theme_minimal()+labs(x="Models",y="Recall",title = "Recall Distributions")
+leveneTest(values~ind,data=recall_df)
+recall_anova = TukeyHSD(aov(values~ind,data = recall_df))
+recall_anova
+
+precision_df = stack(data.frame(Random_Forest=rf_cm_all$Precision,LogitBoost=lb_cm_all$Precision)) #AdaBoost=ada_cm_all$Precision,
+ggplot(data=precision_df,aes(y=values,x=ind))+geom_violin()+theme_minimal()+labs(x="Models",y="Precision",title = "Precision Distributions")
+leveneTest(values~ind,data=precision_df)
+precision_anova = TukeyHSD(aov(values~ind,data = precision_df))
+precision_anova
+```
+
+And for the Random Forest model, variable importance and appearance plots can be created to compare the impact of different features in the model.
+```{r}
+#Combine all variable importance into one table
+var_Imp = rf_VarImp[[1]]
+var_Imp = var_Imp$importance
+var_Imp = var_Imp %>% rownames_to_column(var='Feature')
+var_Imp = arrange(var_Imp,Feature)
+var_Imp = column_to_rownames(var_Imp,var="Feature")
+
+for(i in 2:20){
+  a = rf_VarImp[[i]]
+  a = a$importance
+  a = a %>% rownames_to_column(var='Feature')
+  a = a %>% arrange(Feature)
+  var_Imp = bind_cols(var_Imp,a)
+  var_Imp = column_to_rownames(var_Imp,var="Feature")
+}
+for(i in 1:nrow(var_Imp)){
+  var_Imp$mean[i] = sum(var_Imp[i,1:20])/20
+  var_Imp$sd[i] = sd(var_Imp[i,1:20])
+}
+
+var_Imp = var_Imp %>% rownames_to_column( var = 'Feature') %>% select(mean,sd,Feature)%>%arrange(desc(mean))
+
+var_Imp$Feature <- factor(var_Imp$Feature, levels = var_Imp$Feature[order(var_Imp$mean)])
+ggplot(var_Imp[1:10,],aes(x=Feature,y=mean))+
+  geom_col(width = 0.5,color = 'black',fill = 'beige')+
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), width=.3,color='royalblue4')+
+  labs(y="Mean Variable Importance",title="Random Forest Variable Importance Top 10")+
+  theme_minimal()+
+  coord_flip()
+
+#Combine all variable node appearence count into one table
+var_used = rf_varUsed[[1]]
+colnames(var_used)[colnames(var_used)=="rf_fit$coefnames"] = "Feature"
+colnames(var_used)[colnames(var_used)=="varUsed(rf_fit$finalModel)"] = "Count"
+var_used = arrange(var_used,Feature)
+var_used = column_to_rownames(var_used,var='Feature') 
+
+for(i in 2:20){
+  a = rf_varUsed[[i]]
+  colnames(a)[colnames(a)=="rf_fit$coefnames"] = "Feature"
+  colnames(a)[colnames(a)=="varUsed(rf_fit$finalModel)"] = "Count"
+  a = a %>% arrange(Feature)
+  var_used = bind_cols(var_used,a)
+  var_used = column_to_rownames(var_used,var='Feature') 
+  
+}
+for(i in 1:nrow(var_used)){
+  var_used$mean[i] = sum(var_used[i,1:20])/20
+  var_used$sd[i] = sd(var_used[i,1:20])
+}
+var_used = var_used %>% rownames_to_column( var = 'Feature') %>% select(mean,sd,Feature)%>%arrange(desc(mean))
+
+var_used$Feature <- factor(var_used$Feature, levels = var_used$Feature[order(var_used$mean)])
+ggplot(var_used[1:10,],aes(x=Feature,y=mean))+
+  geom_col(width = 0.5,color = 'black',fill = 'beige')+
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), width=.3,color='royalblue4')+
+  labs(title="Mean Variable Node Appearance Top 10",y='Mean Node Count')+
+  theme_minimal()+
+  coord_flip()
+```
+
+Next, we can compare the prediction results for the top 800 ranked ships in the same way we compared the overall performance
+
+```{r}
+rf_top800 = data.frame(TN=c(0),FN=c(0),FP=c(0),TP=c(0))
+rf_probs_comb = data.frame(Random_Forest=c(0),response=c(0))
+
+#ada_top800 = data.frame(TN=c(0),FN=c(0),FP=c(0),TP=c(0))
+#ada_probs_comb = data.frame(AdaBoost=c(0),response=c(0))
+
+lb_top800 = data.frame(TN=c(0),FN=c(0),FP=c(0),TP=c(0))
+lb_probs_comb = data.frame(LogitBoost=c(0),response=c(0))
+#Combines all data for RF, ADA, LB
+for(i in 1:20){
+  a = rf_probs[[i]]
+  TP = sum(as.numeric(a$response[1:800]))
+  FP = 800-TP
+  FN = sum(as.numeric(a$response[801:nrow(a)]))
+  TN = nrow(a)-800-FN
+  rf_top800[i,1]=TN
+  rf_top800[i,2]=FN
+  rf_top800[i,3]=FP
+  rf_top800[i,4]=TP
+  
+  #Combine the probability results into one dataframe to create a nice plot in the end
+  rf_probs_comb= bind_rows(rf_probs_comb,data.frame(Random_Forest = a$X1,response=a$response))
+  
+}
+
+#for(i in 1:20){
+#  a = ada_probs[[i]]
+#  TP = sum(as.numeric(a$response[1:800]))
+#  FP = 800-TP
+#  FN = sum(as.numeric(a$response[801:nrow(a)]))
+#  TN = nrow(a)-800-FN
+#  ada_top800[i,1]=TN
+#  ada_top800[i,2]=FN
+#  ada_top800[i,3]=FP
+#  ada_top800[i,4]=TP
+  
+  #Combine the probability results into one dataframe to create a nice plot in the end
+#  ada_probs_comb= bind_rows(ada_probs_comb,data.frame(AdaBoost = a$X1,response=a$response))
+  
+#}
+
+for(i in 1:20){
+  a = lb_probs[[i]]
+  TP = sum(as.numeric(a$response[1:800]))
+  FP = 800-TP
+  FN = sum(as.numeric(a$response[801:nrow(a)]))
+  TN = nrow(a)-800-FN
+  lb_top800[i,1]=TN
+  lb_top800[i,2]=FN
+  lb_top800[i,3]=FP
+  lb_top800[i,4]=TP
+  
+  #Combine the probability results into one dataframe to create a nice plot in the end
+  lb_probs_comb= bind_rows(lb_probs_comb,data.frame(LogitBoost = a$X1,response=a$response))
+  
+}
+
+
+#Add performance indicators for RF, ADA, LB
+for(i in 1:20){
+  rf_top800$FOR[i] = rf_top800$FN[i]/(rf_top800$TN[i]+rf_top800$FN[i])
+  rf_top800$Precision[i] = rf_top800$TP[i]/(rf_top800$TP[i]+rf_top800$FP[i])
+  rf_top800$FPR[i] = rf_top800$FP[i]/(rf_top800$FP[i]+rf_top800$TN[i])
+  rf_top800$Recall[i] = rf_top800$TP[i]/(rf_top800$TP[i]+rf_top800$FN[i])
+  rf_top800$MCC[i] = mcc(rf_top800$TN[i],rf_top800$FN[i],rf_top800$FP[i],rf_top800$TP[i])
+}
+
+#for(i in 1:20){
+#  ada_top800$FOR[i] = ada_top800$FN[i]/(ada_top800$TN[i]+ada_top800$FN[i])
+#  ada_top800$Precision[i] = ada_top800$TP[i]/(ada_top800$TP[i]+ada_top800$FP[i])
+#  ada_top800$FPR[i] = ada_top800$FP[i]/(ada_top800$FP[i]+ada_top800$TN[i])
+#  ada_top800$Recall[i] = ada_top800$TP[i]/(ada_top800$TP[i]+ada_top800$FN[i])
+#  ada_top800$MCC[i] = mcc(ada_top800$TN[i],ada_top800$FN[i],ada_top800$FP[i],ada_top800$TP[i])
+#}
+
+for(i in 1:20){
+  lb_top800$FOR[i] = lb_top800$FN[i]/(lb_top800$TN[i]+lb_top800$FN[i])
+  lb_top800$Precision[i] = lb_top800$TP[i]/(lb_top800$TP[i]+lb_top800$FP[i])
+  lb_top800$FPR[i] = lb_top800$FP[i]/(lb_top800$FP[i]+lb_top800$TN[i])
+  lb_top800$Recall[i] = lb_top800$TP[i]/(lb_top800$TP[i]+lb_top800$FN[i])
+  lb_top800$MCC[i] = mcc(lb_top800$TN[i],lb_top800$FN[i],lb_top800$FP[i],lb_top800$TP[i])
+}
+
+#These lines do the following
+#1. Stack the results from the models
+#2. Plot the distributions to check for normality
+#3. Do a levene test to check homogeneity of variance
+#4. Post Hoc test on a one way anova to test what models are different to other models
+mcc_df = stack(data.frame(Random_Forest=rf_top800$MCC,LogitBoost=lb_top800$MCC)) #AdaBoost=ada_top800$MCC,
+ggplot(data=mcc_df,aes(y=values,x=ind))+geom_violin()+theme_minimal()+labs(x="Models",y="MCC",title = "MCC Distributions")
+leveneTest(values~ind,data=mcc_df)
+mcc_anova = TukeyHSD(aov(values~ind,data = mcc_df))
+mcc_anova
+
+recall_df = stack(data.frame(Random_Forest=rf_top800$Recall,LogitBoost=lb_top800$Recall)) #AdaBoost=ada_top800$Recall,
+ggplot(data=recall_df,aes(y=values,x=ind))+geom_violin()+theme_minimal()+labs(x="Models",y="Recall",title = "Recall Distributions")
+leveneTest(values~ind,data=recall_df)
+recall_anova = TukeyHSD(aov(values~ind,data = recall_df))
+recall_anova
+
+precision_df = stack(data.frame(Random_Forest=rf_top800$Precision,LogitBoost=lb_top800$Precision)) #AdaBoost=ada_top800$Precision,
+ggplot(data=precision_df,aes(y=values,x=ind))+geom_violin()+theme_minimal()+labs(x="Models",y="Precision",title = "Precision Distributions")
+leveneTest(values~ind,data=precision_df)
+precision_anova = TukeyHSD(aov(values~ind,data = precision_df))
+precision_anova
+
+```
+
+Lastly, we can plot the ROC Curves and give the AUC scores
+```{r}
+#Gives the ROC curves
+plot.new()
+plot(roc(response=rf_probs_comb$response,predictor=rf_probs_comb$Random_Forest))
+#lines(roc(response=ada_probs_comb$response,predictor=ada_probs_comb$AdaBoost),col='green')
+lines(roc(response=lb_probs_comb$response,predictor=lb_probs_comb$LogitBoost),col='blue')
+legend("bottomright",inset = 0.05, legend=c("Random Forest", "LogitBoost","AdaBoost"),col=c("black", "blue","green"),lty=1:1, cex=0.8) #,"AdaBoost"
+
+
+#To read out the AUC scores
+roc(response=rf_probs_comb$response,predictor=rf_probs_comb$Random_Forest)
+#roc(response=ada_probs_comb$response,predictor=ada_probs_comb$AdaBoost)
+roc(response=lb_probs_comb$response,predictor=lb_probs_comb$LogitBoost)
+```

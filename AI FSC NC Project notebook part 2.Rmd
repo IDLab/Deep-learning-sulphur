@@ -1,0 +1,226 @@
+---
+title: "FSC non-compliance project Part 2"
+output:
+  html_document:
+    df_print: paged
+---
+
+Step 4c: Import the hashedShipSet.csv manually into the global workspace.
+Then, it can be renamed and the features can be casted into the correct format and relevant libraries are imported again.
+```{r}
+#install.packages("e1071")
+library(e1071)
+library(ca)
+library(dplyr)
+library(randomForest)
+library(ggplot2)
+library(tibble)
+library(tidyr)
+library(readxl)
+library(stringr)
+library(caret)
+library(pROC)
+library(ggthemes)
+library(plotROC)
+
+#shipSet = hashedShipSet
+
+#setwd("~/R/Zeevaart/Data")
+shipSet <- read.csv2("../Data/shipSet.csv", sep = ",") #, stringsAsFactors = FALSE)
+set.seed(321)
+n <- nrow(shipSet)
+ind <- sample(1:n, 0.2*n)
+shipSet <- shipSet[ind,]
+
+shipSet$Flag = as.factor(shipSet$Flag)
+shipSet$ismimo = as.factor(shipSet$ismimo)
+shipSet$ShipType = as.factor(shipSet$ShipType)
+shipSet$IMO = as.character(shipSet$IMO)
+shipSet$Country = as.factor(shipSet$Country)
+shipSet$Ship_GT = as.integer(shipSet$Ship_GT)
+shipSet$response = as.factor(shipSet$response)
+shipSet$flagChange = as.factor(shipSet$flagChange)
+shipSet$typeChange = as.factor(shipSet$typeChange)
+shipSet$ismimoChange = as.factor(shipSet$ismimoChange)
+shipSet$countryChange = as.factor(shipSet$countryChange)
+shipSet$DateOfLastVisit = as.POSIXct(shipSet$DateOfLastVisit)
+```
+
+Now the data is ready for training 
+
+Step 5: Training the models
+
+The first step of model training is proper train-test-validation set creation. The shipSet is split into 2 equal sized parts for training and vaildation
+```{r}
+# first split the set into a training and test set. Afterwards run a variety of models
+# using crossvalidation during training. These models will then be tested on the test sets.
+set.seed(754)
+comp = shipSet %>% filter(response != 1)
+nonComp = shipSet %>% filter(response == 1)
+randnum <- runif(nrow(nonComp)) #uniformly distributed random numbers in the range [0,1]
+randnum2 = runif(nrow(comp))
+
+traindata <- nonComp[randnum<=0.50, ] #50/50 split
+traindata = traindata %>% bind_rows(comp[randnum2<=0.50, ])
+
+testdata<- nonComp[randnum>0.50, ]
+testdata = testdata %>% bind_rows(comp[randnum2>0.50, ])
+
+testdata = testdata %>% arrange(IMO)
+traindata = traindata %>% arrange(IMO)
+
+traindata = select(traindata, -IMO)
+
+testresponse = testdata$response
+testdata = select(testdata,-IMO,-response) 
+
+testresponse = make.names(testresponse)
+testresponse = as.factor(testresponse)
+traindata$response = make.names(traindata$response)
+traindata$response = as.factor(traindata$response)
+
+remove(shipSet)
+
+```
+
+Then a training/testing method is defined that uses 5fold X-validation for parameter tuning with downsampling for the classimbalance.
+```{r}
+# downsampling downsamples the more prevailant class to reduce class imbalance. This means that with 5fold Xvaldiation
+# we split approx. 250 nonComp samples into 5 folds together with around 375 compliant ships. it takes around 20minutes
+# to train the random forest on ~625 samples. Without downsampling we estimate it to take 7 hours because of the 13070 samples,
+# if the runtime scales linearly with the samples.
+
+# repeats can be set to more if needed, but for runtime issues it's set to 1 for the moment
+fitControl = trainControl(method='cv',number=5,classProbs = TRUE,sampling = 'down')
+```
+
+Now that a training- and a test-set are prepared and a training-method is defined, a random forest model can be trained...
+```{r}
+rf_fit = train(response ~ ., data=traindata,
+                   method = "rf",
+                   metric = "Kappa",
+                   trControl = fitControl,
+                   na.action=na.exclude)
+plot(rf_fit)
+rf_fit
+```
+...and validated on the testset.
+```{r}
+rf_cm = confusionMatrix(predict(rf_fit, newdata = testdata),testresponse)
+rf_cm
+```
+
+The same can be done for different models like adaboost and logitboost. Watch out, this code will take a while (multiple hours possibly) to run.
+```{r}
+#adaboost_fit = train(response ~ ., data=traindata,
+#                     method = "adaboost",
+#                     metric = "Kappa",
+#                     trControl = fitControl,
+#                     na.action=na.exclude)
+#plot(adaboost_fit)
+#adaboost_fit
+#ada_CM <- confusionMatrix(predict(adaboost_fit, newdata = testdata), testresponse)
+#ada_CM
+
+logboost_fit <- train(response ~ ., data = traindata,
+                       method = "LogitBoost",
+                       trControl = fitControl,
+                       na.action=na.exclude)
+plot(logboost_fit)
+logboost_fit
+logboost_cm <- confusionMatrix(predict(logboost_fit, newdata = testdata), testresponse)
+logboost_cm
+```
+
+Step 6: Compare the models
+Models can also predict probabilities instead of classes which can be used to calculate ROC-Curves or sort for X-number of top instances.
+```{r}
+rf_prob_results = predict(rf_fit, newdata = testdata, type = "prob")
+rf_prob_results$response = testresponse
+rf_prob_results=arrange(rf_prob_results,desc(X1))
+rf_prob_results$response = as.numeric(rf_prob_results$response)
+rf_prob_results$response = rf_prob_results$response-1
+
+#ada_prob_results = predict(adaboost_fit, newdata = testdata, type = "prob")
+#ada_prob_results$response = testresponse
+#ada_prob_results=arrange(ada_prob_results,desc(X1))
+#ada_prob_results$response = as.numeric(ada_prob_results$response)
+#ada_prob_results$response = ada_prob_results$response-1
+
+logBoost_prob_results = predict(logboost_fit, newdata = testdata, type = "prob")
+logBoost_prob_results$response = testresponse
+logBoost_prob_results=arrange(logBoost_prob_results,desc(X1))
+logBoost_prob_results$response = as.numeric(logBoost_prob_results$response)
+logBoost_prob_results$response = logBoost_prob_results$response-1
+
+#Combine the probability results into one dataframe to create a nice plot in the end
+results=data.frame(Random_Forest = rf_prob_results$X1, 
+                   LogitBoost=logBoost_prob_results$X1,response=rf_prob_results$response) #AdaBoost = ada_prob_results$X1,
+
+#Melt them into the right format for geom_roc
+results_roc=melt_roc(results,"response",c('Random_Forest','LogitBoost')) #'AdaBoost',
+
+#Change a colname so the legend has a proper title
+colnames(results_roc)[colnames(results_roc)=="name"] = "Model"
+
+#Plot a combined ROC-Curve plot
+ggplot(results_roc,aes(d = D, m = M,color=Model))+
+  geom_roc(labels = FALSE)+
+  theme_minimal()+
+  labs(x = "False Positive Fraction",  y = "True Positive Fraction")+
+  ggtitle('ROC Curves')
+```
+Step 6: Compare the models zonder ADA
+Models can also predict probabilities instead of classes which can be used to calculate ROC-Curves or sort for X-number of top instances.
+```{r}
+rf_prob_results = predict(rf_fit, newdata = testdata, type = "prob")
+rf_prob_results$response = testresponse
+rf_prob_results=arrange(rf_prob_results,desc(X1))
+rf_prob_results$response = as.numeric(rf_prob_results$response)
+rf_prob_results$response = rf_prob_results$response-1
+
+logBoost_prob_results = predict(logboost_fit, newdata = testdata, type = "prob")
+logBoost_prob_results$response = testresponse
+logBoost_prob_results=arrange(logBoost_prob_results,desc(X1))
+logBoost_prob_results$response = as.numeric(logBoost_prob_results$response)
+logBoost_prob_results$response = logBoost_prob_results$response-1
+
+#Combine the probability results into one dataframe to create a nice plot in the end
+results=data.frame(Random_Forest = rf_prob_results$X1, LogitBoost=logBoost_prob_results$X1,response=rf_prob_results$response)
+
+#Melt them into the right format for geom_roc
+results_roc=melt_roc(results,"response",c('Random_Forest','LogitBoost'))
+
+#Change a colname so the legend has a proper title
+colnames(results_roc)[colnames(results_roc)=="name"] = "Model"
+
+#Plot a combined ROC-Curve plot
+ggplot(results_roc,aes(d = D, m = M,color=Model))+
+  geom_roc(labels = FALSE)+
+  theme_minimal()+
+  labs(x = "False Positive Fraction",  y = "True Positive Fraction")+
+  ggtitle('ROC Curves')
+```
+
+Lastly, for the Random Forest model, variable importance and appearance plots can be created to compare the impact of different features in the model.
+```{r}
+#variable importance plot
+rf_varImp = varImp(rf_fit)
+ggplot(rf_varImp,top=100)+labs(title="Random Forest Variable Importance Top 10")+theme_minimal()
+
+#Variables Used Plot
+rf_varUsed = data_frame(rf_fit$coefnames,varUsed(rf_fit$finalModel))
+colnames(rf_varUsed)[colnames(rf_varUsed)=="rf_fit$coefnames"] = "Feature"
+colnames(rf_varUsed)[colnames(rf_varUsed)=="varUsed(rf_fit$finalModel)"] = "Count"
+rf_varUsed = arrange(rf_varUsed, desc(Count))
+rf_varUsed$Feature <- factor(rf_varUsed$Feature, levels = rf_varUsed$Feature[order(rf_varUsed$Count)])
+ggplot(rf_varUsed[1:100,],aes(x=Feature,y=Count))+
+  geom_col()+
+  labs(title="Random Forest Node Appearances Top 10")+
+  theme_minimal()+
+  coord_flip()
+```
+
+
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
